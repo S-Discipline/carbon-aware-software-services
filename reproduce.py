@@ -301,72 +301,75 @@ def mode_main_sim():
                        "carbonstat_e=4": (4.0, 27.5), "carbonstat_e=8": (8.0, 44.9)},
     }
 
-    # choose strategy stats
-    stats_path = os.path.join(CONFIG, "strategies_measured.csv")
-    stats_src = "measured"
-    if not os.path.exists(stats_path):
-        stats_path = os.path.join(CONFIG, "strategies.csv")
-        stats_src = "nominal"
+    # preload both strategy cost models
     nominal, _ = read_strategy_stats(os.path.join(CONFIG, "strategies.csv"))
-    measured, _ = read_strategy_stats(stats_path)
-    stats = measured if stats_src == "measured" else nominal
-    log(f"strategy stats source: {stats_src}")
-    for s in ["LowPower", "MediumPower", "HighPower"]:
-        log(f"  {s:<12} elapsed {stats[s]['elapsed_ms']:.2f} ms  error {stats[s]['error_pct']:.3f} %")
+    measured_path = os.path.join(CONFIG, "strategies_measured.csv")
+    if os.path.exists(measured_path):
+        measured, _ = read_strategy_stats(measured_path)
+    else:
+        measured = nominal
+        log("WARNING: no measured strategy stats; using nominal")
 
-    results = {}
-    for profile in profiles:
-        pdir = os.path.join(traces_root, profile)
-        days = sorted(os.listdir(os.path.join(pdir, "values")))
-        log(f"\nprofile {profile}: {len(days)} days")
+    all_results = {}
+    for stats_src, stats in (("measured", measured), ("nominal", nominal)):
+        log(f"\n--- strategy stats source: {stats_src} ---")
+        for s in ["LowPower", "MediumPower", "HighPower"]:
+            log(f"  {s:<12} elapsed {stats[s]['elapsed_ms']:.2f} ms  error {stats[s]['error_pct']:.3f} %")
 
-        assignments = {}
-        for e in errors_eps:
-            assignments[e] = {}
+        results = {}
+        for profile in profiles:
+            pdir = os.path.join(traces_root, profile)
+            days = sorted(os.listdir(os.path.join(pdir, "values")))
+            log(f"\nprofile {profile}: {len(days)} days")
+
+            assignments = {}
+            for e in errors_eps:
+                assignments[e] = {}
+                for d in days:
+                    apath = os.path.join(pdir, f"error_{e:02d}", f"assignment_{d}")
+                    assignments[e][d] = parse_assignment(apath)
+
+            agg = {p: {"carbon_mg": 0.0, "err_w": 0.0, "reqs": 0, "max_err": 0.0} for p in policies}
             for d in days:
-                apath = os.path.join(pdir, f"error_{e:02d}", f"assignment_{d}")
-                assignments[e][d] = parse_assignment(apath)
+                with open(os.path.join(pdir, "values", d)) as f:
+                    rows = list(csv.DictReader(f))
+                for row in rows:
+                    slot = row["time"]
+                    c_actual = int(row["actual_carbon"])
+                    c_forecast = int(row["forecast_carbon"])
+                    r_actual = int(row["actual_reqs"])
+                    r_forecast = int(float(row["forecast_reqs"]))
+                    if r_actual == 0:
+                        continue
+                    slot_policies = {
+                        "always_low": "LowPower",
+                        "always_medium": "MediumPower",
+                        "always_high": "HighPower",
+                        "naive": naive_strategy(c_forecast, r_forecast),
+                    }
+                    for e in errors_eps:
+                        slot_policies[f"carbonstat_e={e}"] = assignments[e][d][slot]
+                    for p in policies:
+                        s = slot_policies[p]
+                        e_pct = stats[s]["error_pct"]
+                        t_ms = stats[s]["elapsed_ms"]
+                        agg[p]["carbon_mg"] += emissions_mg(t_ms, c_actual) * r_actual
+                        agg[p]["err_w"] += e_pct * r_actual
+                        agg[p]["reqs"] += r_actual
+                        agg[p]["max_err"] = max(agg[p]["max_err"], e_pct)
 
-        agg = {p: {"carbon_mg": 0.0, "err_w": 0.0, "reqs": 0, "max_err": 0.0} for p in policies}
-        for d in days:
-            with open(os.path.join(pdir, "values", d)) as f:
-                rows = list(csv.DictReader(f))
-            for row in rows:
-                slot = row["time"]
-                c_actual = int(row["actual_carbon"])
-                c_forecast = int(row["forecast_carbon"])
-                r_actual = int(row["actual_reqs"])
-                r_forecast = int(float(row["forecast_reqs"]))
-                if r_actual == 0:
-                    continue
-                slot_policies = {
-                    "always_low": "LowPower",
-                    "always_medium": "MediumPower",
-                    "always_high": "HighPower",
-                    "naive": naive_strategy(c_forecast, r_forecast),
-                }
-                for e in errors_eps:
-                    slot_policies[f"carbonstat_e={e}"] = assignments[e][d][slot]
-                for p in policies:
-                    s = slot_policies[p]
-                    e_pct = stats[s]["error_pct"]
-                    t_ms = stats[s]["elapsed_ms"]
-                    agg[p]["carbon_mg"] += emissions_mg(t_ms, c_actual) * r_actual
-                    agg[p]["err_w"] += e_pct * r_actual
-                    agg[p]["reqs"] += r_actual
-                    agg[p]["max_err"] = max(agg[p]["max_err"], e_pct)
-
-        results[profile] = {}
-        high_carbon = agg["always_high"]["carbon_mg"]
-        for p in policies:
-            avg_err = agg[p]["err_w"] / agg[p]["reqs"]
-            reduction = (1 - agg[p]["carbon_mg"] / high_carbon) * 100.0
-            results[profile][p] = {"err": avg_err, "red": reduction,
-                                   "carbon_mg": agg[p]["carbon_mg"]}
-            ref = paper[profile].get(p)
-            ref_str = f"paper err/red {ref[0]}/{ref[1]}" if ref else ""
-            log(f"  {p:<18} err {avg_err:5.2f} %   red {reduction:5.1f} %   "
-                f"carbon {agg[p]['carbon_mg']/1000:.2f} g   {ref_str}")
+            results[profile] = {}
+            high_carbon = agg["always_high"]["carbon_mg"]
+            for p in policies:
+                avg_err = agg[p]["err_w"] / agg[p]["reqs"]
+                reduction = (1 - agg[p]["carbon_mg"] / high_carbon) * 100.0
+                results[profile][p] = {"err": avg_err, "red": reduction,
+                                       "carbon_mg": agg[p]["carbon_mg"]}
+                ref = paper[profile].get(p)
+                ref_str = f"paper err/red {ref[0]}/{ref[1]}" if ref else ""
+                log(f"  {p:<18} err {avg_err:5.2f} %   red {reduction:5.1f} %   "
+                    f"carbon {agg[p]['carbon_mg']/1000:.2f} g   {ref_str}")
+        all_results[stats_src] = results
 
     log("\n" + "=" * 78)
     log("SUMMARY (quality guarantee check): achieved avg error vs threshold")
@@ -374,7 +377,7 @@ def mode_main_sim():
     for profile in profiles:
         line = []
         for e in errors_eps:
-            err = results[profile][f"carbonstat_e={e}"]["err"]
+            err = all_results["measured"][profile][f"carbonstat_e={e}"]["err"]
             line.append(f"eps={e}: {err:.2f}% {'OK' if err <= e + 1e-9 else 'EXCEEDED'}")
         log(f"{profile:<12} " + "  ".join(line))
 

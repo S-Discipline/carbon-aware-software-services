@@ -1,5 +1,4 @@
 {
-  "mode": "strategies-measure",
-  "iterations": 10,
-  "requests_per_strategy": 100
+  "mode": "main-sim",
+  "profiles": ["camel", "stable300", "stable500"]
 }
