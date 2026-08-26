@@ -147,18 +147,18 @@ def mode_motivating_example():
             log("  " + line.strip())
         summary.append({"eps": eps, "seq": seq, "co2_g": co2_g, "avg_err": avg_err})
 
-    high = summary[0]["co2_g"]
-    low = summary[1]["co2_g"]
-    mid = summary[2]["co2_g"]
+    high = summary[0]["co2_g"]      # eps=0
+    mixed = summary[1]["co2_g"]     # eps=5
+    low = summary[2]["co2_g"]       # eps=15
     log("\n" + "=" * 78)
     log("SUMMARY (motivating example)")
     log("=" * 78)
     log(f"high-power  : {high:.3f} gCO2-eq   (paper: 1.72 gCO2-eq)")
     log(f"low-power   : {low:.3f} gCO2-eq   (paper: 0.60 gCO2-eq, -65.1% vs high)")
-    log(f"eps=5 mixed : {mid:.3f} gCO2-eq   (paper: 1.07 gCO2-eq, -37.8% vs high, +43.9% vs low)")
+    log(f"eps=5 mixed : {mixed:.3f} gCO2-eq   (paper: 1.07 gCO2-eq, -37.8% vs high, +43.9% vs low)")
     log(f"reduction low vs high : {(1 - low / high) * 100:.1f}%   (paper: 65.1%)")
-    log(f"reduction eps5 vs high: {(1 - mid / high) * 100:.1f}%   (paper: 37.8%)")
-    log(f"eps=5 avg error       : {summary[2]['avg_err']:.2f} %   (paper: 4.98 %)")
+    log(f"reduction eps5 vs high: {(1 - mixed / high) * 100:.1f}%   (paper: 37.8%)")
+    log(f"eps=5 avg error       : {summary[1]['avg_err']:.2f} %   (paper: 4.98 %)")
     ok = all(s["seq"] == paper_assignments[s["eps"]] for s in summary)
     log(f"all assignments match paper : {ok}")
 
