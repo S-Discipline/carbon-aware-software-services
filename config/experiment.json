@@ -1,3 +1,5 @@
 {
-  "mode": "motivating-example"
+  "mode": "strategies-measure",
+  "iterations": 10,
+  "requests_per_strategy": 100
 }
