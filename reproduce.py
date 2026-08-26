@@ -53,6 +53,7 @@ def run_carbonstat(input_time_slots, error_threshold, output_assignment):
 
 
 def parse_assignment(output_assignment):
+    """Return {time_slot: strategy}. Keys collide if timestamps repeat."""
     strategy_of_slot = {}
     with open(output_assignment) as f:
         for i, line in enumerate(f):
@@ -61,6 +62,17 @@ def parse_assignment(output_assignment):
             slot, strategy = line.strip().split(",")[:2]
             strategy_of_slot[slot] = strategy
     return strategy_of_slot
+
+
+def parse_assignment_ordered(output_assignment):
+    """Return the list of strategies in file (slot) order."""
+    seq = []
+    with open(output_assignment) as f:
+        for i, line in enumerate(f):
+            if i == 0:
+                continue
+            seq.append(line.strip().split(",")[1])
+    return seq
 
 
 def read_strategy_stats(path):
@@ -111,10 +123,7 @@ def mode_motivating_example():
     for eps in [0, 5, 15]:
         out_csv = os.path.join(DATA, "tmp_assignment.csv")
         stdout = run_carbonstat(example, eps, out_csv)
-        assignment = parse_assignment(out_csv)
-        strategy_seq = [assignment[f"slot{i + 1}"] for i in range(6)]
-        # the paper's example rows are unlabeled in Section III-B; use row order
-        seq = [strategy_seq[i] for i in range(6)]
+        seq = parse_assignment_ordered(out_csv)
 
         # emissions with the paper's nominal service times (unrounded), 50W formula
         co2_mg = sum(
@@ -149,7 +158,7 @@ def mode_motivating_example():
     log(f"eps=5 mixed : {mid:.3f} gCO2-eq   (paper: 1.07 gCO2-eq, -37.8% vs high, +43.9% vs low)")
     log(f"reduction low vs high : {(1 - low / high) * 100:.1f}%   (paper: 65.1%)")
     log(f"reduction eps5 vs high: {(1 - mid / high) * 100:.1f}%   (paper: 37.8%)")
-    log(f"eps=5 avg error       : {mid and round(mid / mid, 0) or ''}")
+    log(f"eps=5 avg error       : {summary[2]['avg_err']:.2f} %   (paper: 4.98 %)")
     ok = all(s["seq"] == paper_assignments[s["eps"]] for s in summary)
     log(f"all assignments match paper : {ok}")
 
